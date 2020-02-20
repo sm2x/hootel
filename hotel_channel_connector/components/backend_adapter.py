@@ -44,6 +44,9 @@ class HotelChannelInterfaceAdapter(AbstractComponent):
     def fetch_new_bookings(self):
         raise NotImplementedError
 
+    def fetch_bookings(self, dfrom, dto):
+        raise NotImplementedError
+
     def fetch_booking(self, channel_reservation_id):
         raise NotImplementedError
 
@@ -51,6 +54,12 @@ class HotelChannelInterfaceAdapter(AbstractComponent):
         raise NotImplementedError
 
     def create_plan(self, name, daily=1):
+        raise NotImplementedError
+
+    def create_vplan(self, name, pid, dtype, value):
+        raise NotImplementedError
+
+    def modify_vplan(self, pid, dtype, value):
         raise NotImplementedError
 
     def delete_plan(self, channel_plan_id):

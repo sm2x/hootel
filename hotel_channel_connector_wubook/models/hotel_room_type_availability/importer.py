@@ -63,7 +63,7 @@ class HotelRoomTypeAvailabilityImporter(Component):
                             ('date', '=', room['date'])
                         ], limit=1)
                         if room_type_avail_bind:
-                            if room_type_avail_bind.avail != room['avail']:
+                            if room_type_avail_bind.channel_avail != room['avail']:
                                 room_type_avail_bind.with_context({
                                     'connector_no_export': True,
                                 }).write({'channel_pushed': False})
@@ -72,10 +72,11 @@ class HotelRoomTypeAvailabilityImporter(Component):
                                     dfrom=room['date'], dto=room['date'],
                                     internal_message=_(
                                         "Channel try to change availiability! \
-                                        Updating channel values... \
-                                        (Odoo: %d -- Channel: %d" % (
+                                        Updating channel values for Room Type %s... \
+                                        (Odoo: %d -- Channel: %d)" % (
+                                            room_type_avail_bind.room_type_id.name,
                                             room['avail'],
-                                            room_type_avail_bind)))
+                                            room_type_avail_bind.channel_avail)))
                         else:
                             room_type_avail_bind = channel_room_type_avail_obj.with_context({
                                 'connector_no_export': True,
@@ -94,7 +95,8 @@ class HotelRoomTypeAvailabilityImportMapper(Component):
     direct = [
         ('no_ota', 'no_ota'),
         ('booked', 'booked'),
-        ('avail', 'avail'),
+        ('avail', 'channel_avail'),
+        ('avail', 'quota'),
         ('date', 'date'),
     ]
 

@@ -200,6 +200,7 @@ HotelCalendarManagement.prototype = {
 
     row = table.insertRow();
     row.setAttribute('name', 'price');
+
     cell = row.insertCell();
     cell.setAttribute('colspan', '4');
     telm = document.createElement("input");
@@ -217,8 +218,9 @@ HotelCalendarManagement.prototype = {
     row = table.insertRow();
     row.setAttribute('name', 'avail');
     row.style.display = 'none';
+
     cell = row.insertCell();
-    cell.setAttribute('colspan', '2');
+    cell.setAttribute('colspan', '1');
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`QUOTA_${roomId}_${dateShortStr}`));
     telm.setAttribute('name', 'quota');
@@ -229,8 +231,9 @@ HotelCalendarManagement.prototype = {
     telm.classList.add('hcal-management-input');
     telm.addEventListener('change', function(ev){ $this.onInputChange(ev, this); }, false);
     cell.appendChild(telm);
+
     cell = row.insertCell();
-    cell.setAttribute('colspan', '2');
+    cell.setAttribute('colspan', '1');
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`MAX_AVAIL_${roomId}_${dateShortStr}`));
     telm.setAttribute('name', 'max_avail');
@@ -242,8 +245,36 @@ HotelCalendarManagement.prototype = {
     telm.addEventListener('change', function(ev){ $this.onInputChange(ev, this); }, false);
     cell.appendChild(telm);
 
+    cell = row.insertCell();
+    cell.setAttribute('colspan', '1');
+    telm = document.createElement("input");
+    telm.setAttribute('id', this._sanitizeId(`FREE_ROOMS_${roomId}_${dateShortStr}`));
+    telm.setAttribute('name', 'free_rooms');
+    telm.setAttribute('type', 'edit');
+    telm.setAttribute('title', this._t('Free Rooms'));
+    telm.setAttribute('readonly', 'readonly');
+    telm.setAttribute('disabled', 'disabled');
+    telm.style.backgroundColor = 'lightgray';
+    telm.dataset.hcalParentCell = parentCell.getAttribute('id');
+    cell.appendChild(telm);
+
+    cell = row.insertCell();
+    cell.setAttribute('colspan', '1');
+    telm = document.createElement("input");
+    telm.setAttribute('id', this._sanitizeId(`CHANNEL_AVAIL_${roomId}_${dateShortStr}`));
+    telm.setAttribute('name', 'channel_avail');
+    telm.setAttribute('type', 'edit');
+    telm.setAttribute('title', this._t('Channel Availability'));
+    telm.setAttribute('readonly', 'readonly');
+    telm.setAttribute('disabled', 'disabled');
+    telm.value = telm.dataset.orgValue = room.channel_avail;
+    telm.dataset.hcalParentCell = parentCell.getAttribute('id');
+    telm.classList.add('hcal-management-input');
+    cell.appendChild(telm);
+
     row = table.insertRow();
     row.setAttribute('name', 'rest_a');
+
     cell = row.insertCell();
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`MIN_STAY_${roomId}_${dateShortStr}`));
@@ -256,6 +287,7 @@ HotelCalendarManagement.prototype = {
     telm.classList.add('hcal-border-radius-left');
     telm.addEventListener('change', function(ev){ $this.onInputChange(ev, this); }, false);
     cell.appendChild(telm);
+
     cell = row.insertCell();
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`MAX_STAY_${roomId}_${dateShortStr}`));
@@ -268,6 +300,7 @@ HotelCalendarManagement.prototype = {
     telm.classList.add('hcal-border-radius-right');
     telm.addEventListener('change', function(ev){ $this.onInputChange(ev, this); }, false);
     cell.appendChild(telm);
+
     cell = row.insertCell();
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`MIN_STAY_ARRIVAL_${roomId}_${dateShortStr}`));
@@ -280,6 +313,7 @@ HotelCalendarManagement.prototype = {
     telm.classList.add('hcal-border-radius-left');
     telm.addEventListener('change', function(ev){ $this.onInputChange(ev, this); }, false);
     cell.appendChild(telm);
+
     cell = row.insertCell();
     telm = document.createElement("input");
     telm.setAttribute('id', this._sanitizeId(`MAX_STAY_ARRIVAL_${roomId}_${dateShortStr}`));
@@ -322,21 +356,10 @@ HotelCalendarManagement.prototype = {
     selectOpt.textContent = this._t("C. Arrival");
     telm.appendChild(selectOpt);
     cell.appendChild(telm);
-    cell = row.insertCell();
-    cell.setAttribute('colspan', '1');
-    telm = document.createElement("input");
-    telm.setAttribute('id', this._sanitizeId(`FREE_ROOMS_${roomId}_${dateShortStr}`));
-    telm.setAttribute('name', 'free_rooms');
-    telm.setAttribute('type', 'edit');
-    telm.setAttribute('title', this._t('Free Rooms'));
-    telm.setAttribute('readonly', 'readonly');
-    telm.setAttribute('disabled', 'disabled');
-    telm.style.backgroundColor = 'lightgray';
-    telm.dataset.hcalParentCell = parentCell.getAttribute('id');
-    cell.appendChild(telm);
 
     row = table.insertRow();
     row.setAttribute('name', 'rest_c');
+
     cell = row.insertCell();
     cell.style.textAlign = 'center';
     cell.setAttribute('colspan', '4');
@@ -725,9 +748,9 @@ HotelCalendarManagement.prototype = {
         var inputIds = [
           `QUOTA_${room_typeId}_${dd.format(HotelCalendarManagement._DATE_FORMAT_SHORT)}`, avail.quota,
           `MAX_AVAIL_${room_typeId}_${dd.format(HotelCalendarManagement._DATE_FORMAT_SHORT)}`, avail.max_avail,
+          `CHANNEL_AVAIL_${room_typeId}_${dd.format(HotelCalendarManagement._DATE_FORMAT_SHORT)}`, avail.channel_avail,
           `NO_OTA_${room_typeId}_${dd.format(HotelCalendarManagement._DATE_FORMAT_SHORT)}`, avail.no_ota
         ];
-
         for (var i=0; i<inputIds.length; i+=2) {
           var inputId = this._sanitizeId(inputIds[i]);
           var input = this.etable.querySelector(`#${inputId}`);
@@ -745,7 +768,8 @@ HotelCalendarManagement.prototype = {
             }
             else {
               input.value = inputIds[i+1];
-              input.style.backgroundColor = (i == 0 && input.value == 0)?'rgb(255, 174, 174)':'';
+              input.style.backgroundColor = (input.name === 'channel_avail' && input.value == 0)?'rgb(255, 174, 174)':'';
+              // input.style.color = (input.name === 'quota' && input.value == 0)?'rgb(255, 174, 174)':'';
             }
           }
         }
@@ -765,6 +789,8 @@ HotelCalendarManagement.prototype = {
         var inputMaxAvail = this.etable.querySelector(`#${inputMaxAvailId}`);
         var inputNoOTAId = this._sanitizeId(`NO_OTA_${room.id}_${ndateStr}`);
         var inputNoOTA = this.etable.querySelector(`#${inputNoOTAId}`);
+        var inputChannelAvailId = this._sanitizeId(`CHANNEL_AVAIL_${room.id}_${ndateStr}`);
+        var inputChannelAvail = this.etable.querySelector(`#${inputChannelAvailId}`);
 
         if (!onlyNew || (onlyNew && (inputQuota.value !== inputQuota.dataset.orgValue
                                       || inputMaxAvail.value !== inputMaxAvail.dataset.orgValue
@@ -774,7 +800,8 @@ HotelCalendarManagement.prototype = {
             'date': ndate.format('YYYY-MM-DD'),
             'quota': inputQuota.value,
             'max_avail': inputMaxAvail.value,
-            'no_ota': Boolean(inputNoOTA.dataset.state === 'true') || false
+            'no_ota': Boolean(inputNoOTA.dataset.state === 'true') || false,
+            'channel_avail': inputChannelAvail.value,
           });
         }
       }

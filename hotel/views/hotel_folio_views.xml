@@ -21,38 +21,22 @@
                     <!-- <button name="send_exit_mail" type="object" string="Send Exit Email"
                        attrs="{'invisible': [('has_checkout_to_send', '=', False)]}" class="oe_highlight"/> -->
                     <button name="%(hotel.action_view_folio_advance_payment_inv)d"
-                        string="Create Invoice" type="action" class="btn-primary" states="sale"
+                        string="Create Invoice" type="action" class="btn-primary"
                         attrs="{'invisible': [('state', '!=', 'confirm')]}"/>
                     <!-- <button name="action_cancel_draft" states="cancel,sale" string="Set to Draft"
                         type="object" icon="fa-undo" class="oe_highlight" /> -->
-                    <button name="action_cancel" string="Cancel Folio" states="sale"
-                        type="object" icon="fa-minus-square" class="oe_highlight" />
-                    <button name="action_cancel" string="Cancel Folio" states="draft"
-                        icon="fa-minus-square" type="object" class="oe_highlight" />
+                    <button name="action_cancel" string="Cancel Folio"
+                        attrs="{'invisible': [('state', 'not in', ('confirm','draft'))]}"
+                        type="object" />
                     <button name="action_done" type="object" string="Set to Done"
-                        help="If a Hotel Folio is done, you cannot modify it manually anymore. However, you will still be able to invoice or deliver. This is used to freeze the Hotel Folio." />
-                        <!-- states="sale" attrs="{'invisible': [('invoice_status', '!=', 'invoiced')]}" -->
+                        help="If a Hotel Folio is done, you cannot modify it manually anymore. However, you will still be able to invoice. This is used to freeze the Hotel Folio." />
                     <!-- <button name="print_quotation" string="Print" type="object" states="sent,sale"/> -->
                     <field name="state" select="2" widget="statusbar"
-                        statusbar_visible="draft,sent,sale,done" invisible="1"/>
+                        statusbar_visible="draft,sent,sale,done" />
                 </header>
 
                 <sheet>
                     <div class=" oe_button_box">
-                       <button type="object" class="oe_stat_button"
-                            id="invoices_smart_button"
-                            icon="fa-thumbs-up"
-                            name="action_payments"
-                            attrs="{'invisible': [('invoices_paid','&lt;=',0)]}">
-                            <div class="o_form_field o_stat_info">
-                                <span class="o_stat_value">
-                                    <field name="invoices_paid" nolabel="1"
-                                    widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                                </span>
-                                <span class="o_stat_text">Paid out</span>
-                            </div>
-                        </button>
-
                         <button type="object" class="oe_stat_button"
                             id="payment_smart_button"
                             icon="fa-money"
@@ -64,20 +48,6 @@
                                     widget="monetary" options="{'currency_field': 'currency_id'}"/>
                                 </span>
                                 <span class="o_stat_text">Pending Payment</span>
-                            </div>
-                        </button> 
-
-                        <button type="object" class="oe_stat_button"
-                            id="refunds_smart_button"
-                            icon="fa-undo"
-                            name="action_return_payments"
-                            attrs="{'invisible': [('refund_amount','&lt;=',0)]}">
-                            <div class="o_form_field o_stat_info">
-                                <span class="o_stat_value">
-                                    <field name="refund_amount" nolabel="1"
-                                    widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                                </span>
-                                <span class="o_stat_text">Refunds</span>
                             </div>
                         </button>
 
@@ -94,7 +64,6 @@
                          </button>
 
                     </div>
-                    <!-- <field name="image" widget="image" class="oe_avatar" options="{&quot;preview_image&quot;: &quot;image_medium&quot;, &quot;size&quot;: [90, 90]}"/> -->
                     <h2><field name="name"/></h2>
                     <h1>
                         <field name="partner_id" default_focus="1" placeholder="Guest" attrs="{'invisible':[('reservation_type','in',('out'))]}"/>
@@ -110,17 +79,20 @@
                             <field name="cancelled_reason" attrs="{'invisible':[('state','not in',('cancel'))]}"/>
                         </group>
                         <group>
-                            <field name="pricelist_id" domain="[('type','=','sale')]" />
+                            <field name="pricelist_id" />
                             <field name="company_id" />
                             <field name="company_id" options="{'no_create': True}" groups="base.group_multi_company"/>
                             <field name="reservation_type" attrs="{'readonly':[('state','not in',('draft'))]}"/>
                             <field name="channel_type" attrs="{'required':[('reservation_type','=','normal')]}"/>
+                            <field name="tour_operator_id"
+                                options="{'no_create': True,'no_open': True}" />
                         </group>
                         <group>
                             <field name="partner_internal_comment"/>
                         </group>
                         <group>
                             <field name="internal_comment"/>
+                            <field name="credit_card_details" attrs="{'invisible':[('pending_amount','&lt;=',0)]}"/>
                         </group>
                         <group colspan="2" class="oe_subtotal_footer oe_right">
                             <field name="amount_untaxed" sum="Untaxed amount" widget='monetary' />
@@ -140,6 +112,8 @@
                         <field name="invoice_ids" invisible="1"/>
                         <field name="invoice_status" invisible="1" />
                         <field name="currency_id" invisible="1"/>
+                        <field name="refund_amount" invisible="1" />
+                        <field name="invoices_paid" invisible="1" />
                     </group>
                     <notebook colspan="4" col="1">
                         <page string="Reservation Rooms">
@@ -152,7 +126,8 @@
                                 context="{'from_room':False,'folio_id': id,'tree_view_ref':'hotel.hotel_service_view_tree', 'form_view_ref':'hotel.hotel_service_view_form'}"
                                 nolabel="1" />
                         </page>
-                        <page name="persons" string="Persons">
+                        <!--TODO: Add precheckin with indeterminate select room?? -->
+                        <page name="persons" string="Persons" invisible="1">
                             <field name="checkin_partner_ids"
                                    context="{
                                     'default_reservation_id': id,
@@ -162,37 +137,58 @@
                             />
                         </page>
                         <page name="invoicing" string="Invoicing">
+                            <div class="alert alert-info" role="alert" style="margin-bottom:0px;">
+                                  these are the billing information associated with the booking client or the company (if a company is assigned). If you want to bill an independent contact, you can select it in the billing assistant
+                            </div>
                             <group>
-                                <field name="partner_diff_invoicing" string="Bill to another Address"/>
-                            </group>
-                            <group>
+                                <field name="partner_parent_id" />
                                 <field name="partner_invoice_id"
-                                       string="Contact Invoiced"
-                                       attrs="{'invisible':[('partner_diff_invoicing','=',False)]}"/>
+                                       string="Contact Invoiced"/>
                             </group>
                             <group>
                                 <group>
-                                    <field name="partner_invoice_vat" />
-                                    <field name="partner_invoice_email" />
-                                </group>
-                                <group>
-                                    <field name="partner_invoice_parent_id" />
-                                    <field name="partner_invoice_type" />
+                                    <field name="partner_invoice_vat"
+                                      attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                           ('partner_invoice_vat','!=', False)]}" />
+                                    <field name="partner_invoice_email"
+                                      attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                           ('partner_invoice_email','!=', False)]}" />
                                 </group>
                                 <group>
                                     <label for="partner_invoice_street" string="Address"/>
                                     <div class="o_address_format">
-                                        <field name="partner_invoice_street" placeholder="Street..." class="o_address_street"/>
-                                        <field name="partner_invoice_street2" placeholder="Street 2..." class="o_address_street"/>
-                                        <field name="partner_invoice_city" placeholder="City" class="o_address_city"/>
-                                        <field name="partner_invoice_state_id" class="o_address_state" placeholder="State" options='{"no_open": True}'/>
-                                        <field name="partner_invoice_zip" placeholder="ZIP" class="o_address_zip"/>
-                                        <field name="partner_invoice_country_id" placeholder="Country" class="o_address_country" options='{"no_open": True, "no_create": True}'/>
+                                        <field name="partner_invoice_street" placeholder="Street..." class="o_address_street"
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_street','!=', False)]}"/>
+                                        <field name="partner_invoice_street2" placeholder="Street 2..." class="o_address_street"
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_street2','!=', False)]}"/>
+                                        <field name="partner_invoice_city" placeholder="City" class="o_address_city"
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_city','!=', False)]}"/>
+                                        <field name="partner_invoice_state_id" class="o_address_state" placeholder="State" options='{"no_open": True}'
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_state_id','!=', False)]}"/>
+                                        <field name="partner_invoice_zip" placeholder="ZIP" class="o_address_zip"
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_zip','!=', False)]}"/>
+                                        <field name="partner_invoice_country_id" placeholder="Country" class="o_address_country" options='{"no_open": True, "no_create": True}'
+                                            attrs="{'readonly': [('partner_invoice_id', '!=', False),
+                                                        ('partner_invoice_country_id','!=', False)]}"/>
                                     </div>
                                 </group>
                                 <group>
                                 </group>
                             </group>
+                        </page>
+                        <page name="payments" string="Payments" attrs="{'invisible': [('invoices_paid','&lt;=',0)]}">
+                            <field name="payment_ids"
+                                   context="{'tree_view_ref':'hotel.account_payment_view_tree_folio', 'form_view_ref':'hotel.account_payment_view_form_folio'}"
+                                   options="{'no_create': True}" />
+                        </page>
+                        <page name="returns" string="Retun Payments" attrs="{'invisible': [('refund_amount','&lt;=',0)]}">
+                            <field name="return_ids"
+                                    options="{'no_create': True}" />
                         </page>
                         <page string="Other data" invisible="1">
                             <group>
@@ -239,6 +235,8 @@
                 <field name="date_order" select="1"/>
                 <field name="room_lines" widget="many2many_tags" />
                 <field name="amount_total" sum="Total amount"/>
+                <field name="pending_amount" sum="Total debt"/>
+                <field name="invoice_status" />
             </tree>
         </field>
     </record>
@@ -290,9 +288,19 @@
         <field name="arch" type="xml">
             <search string="Tables Detail">
                 <field name="partner_id" />
+                <field name="partner_invoice_id" />
+                <field name="tour_operator_id" />
+                <filter name="to_invoice" string="To invoice"
+                    domain="[('invoice_status', '=', 'to invoice')]" />
+                <filter name="payment_pending" string="Payment Pending"
+                    domain="[('pending_amount', '&gt;', 0)]" />
                 <group expand="0" string="Group By">
                     <filter string="Customer" icon="terp-stock_symbol-selection"
                         context="{'group_by':'partner_id'}" />
+                    <filter string="Invoice Contact"
+                        context="{'group_by':'partner_invoice_id'}" />
+                    <filter string="Tour Operator" domain="[]"
+                        context="{'group_by':'tour_operator_id'}"/>
                 </group>
             </search>
         </field>
@@ -341,7 +349,7 @@
         <field name="name">Hotel Folio</field>
         <field name="res_model">hotel.folio</field>
         <field name="view_type">form</field>
-        <field name="view_mode">tree,form,graph</field>
+        <field name="view_mode">tree,form,graph,pivot</field>
     </record>
 
     <menuitem id="menu_all_folio" name="Reservations"

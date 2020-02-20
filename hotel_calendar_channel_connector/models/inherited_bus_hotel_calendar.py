@@ -42,6 +42,7 @@ class BusHotelCalendar(models.TransientModel):
                         'max_avail': vals['max_avail'],
                         'id': vals['id'],
                         'no_ota': vals['no_ota'],
+                        'channel_avail': vals['channel_avail'],
                     },
                 },
             },
@@ -76,3 +77,4 @@ class BusHotelCalendar(models.TransientModel):
         self.env['bus.bus'].sendone(
             (self._cr.dbname, 'hotel.reservation',
              HOTEL_BUS_CHANNEL_ID), notif)
+

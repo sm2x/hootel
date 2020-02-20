@@ -8,6 +8,7 @@ from . import hotel_floor
 from . import hotel_folio
 from . import hotel_reservation
 from . import hotel_room
+from . import hotel_shared_room
 from . import hotel_amenity
 from . import hotel_amenity_type
 from . import hotel_room_type
@@ -31,3 +32,4 @@ from . import hotel_board_service
 from . import hotel_board_service_room_type_line
 from . import hotel_board_service_line
 from . import inherited_account_invoice_line
+from . import hotel_cancelation_rule

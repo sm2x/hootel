@@ -47,6 +47,8 @@ function HotelCalendar(/*String*/querySelector, /*Dictionary*/options, /*List*/p
     startDate: now_utc,
     days: now_utc.daysInMonth(),
     rooms: [],
+    room_types: [],
+    room_classes: [],
     allowInvalidActions: false,
     assistedMovement: false,
     endOfWeek: 6,
@@ -67,7 +69,6 @@ function HotelCalendar(/*String*/querySelector, /*Dictionary*/options, /*List*/p
   this.options.orig_days = this.options.days;
   this.options.days = this.parseDays(this.options.days) + 1;
   this.options.rooms = _.map(this.options.rooms, function(item){ return item.clone(); });
-
   // Check correct values
   if (this.options.rooms.length > 0 && !(this.options.rooms[0] instanceof HRoom)) {
     this.options.rooms = [];
@@ -469,8 +470,8 @@ HotelCalendar.prototype = {
   _calcReservationCellLimits: function(/*HReservationObject*/reservation, /*Int?*/nbed, /*Bool?*/notCheck) {
     var limits = new HLimit();
     if (!reservation.startDate || !reservation.endDate ||
-        (!reservation.startDate.isBetween(this.options.startDate, this._endDate, 'day', '()') &&
-         !reservation.endDate.isBetween(this.options.startDate, this._endDate, 'day', '()') &&
+        (!reservation.startDate.isBetween(this.options.startDate, this._endDate, 'day', '[]') &&
+         !reservation.endDate.isBetween(this.options.startDate, this._endDate, 'day', '[]') &&
          !reservation.startDate.isBefore(this.options.startDate, 'day', '()') &&
          !reservation.endDate.isAfter(this._endDate, 'day', '()'))) {
       return limits;
@@ -598,21 +599,58 @@ HotelCalendar.prototype = {
 
   //==== ROOMS
   _filterRooms: function() {
+    // Two-Step filter: Scrollbar mistake
+    this.options.room_classes = [];
+    this.options.room_types = [];
+    // 1.1 Filter rooms
     for (var r of this.options.rooms) {
       r._active = this._in_domain(r, this._domains[HotelCalendar.DOMAIN.ROOMS]);
       if (r._active) {
         r._html.classList.remove('hcal-hidden');
+        // 1.2 Filter room classes used in occupation rows
+        if (this.options.room_classes.indexOf(r.type) === -1) {
+            this.options.room_classes.push(r.type);
+        }
+        // 1.3 Filter room types used in pricelist rows
+        if (this.options.room_types.indexOf(r._userData.room_type_id) === -1) {
+            this.options.room_types.push(r._userData.room_type_id);
+        }
       } else {
         r._html.classList.add('hcal-hidden');
       }
-      if (r.id in this._reservationsMap) {
-        for (var reserv of this._reservationsMap[r.id]) {
-          this._updateReservation(reserv, !r._active);
-        }
-      }
     }
+    // Hide all the rows corresponding to occupation and prices
+    $("[id^=ROW_DETAIL_FREE_TYPE]").addClass('hcal-hidden');
+    $("[id^=ROW_DETAIL_PRICE_ROOM]").addClass('hcal-hidden');
+    // TODO: update OCCUPATION
 
     this._calcViewHeight();
+
+    // 2. Update Reservations
+    _.defer(function(self){
+      for (var r of self.options.rooms) {
+        var isHidden = r._html.classList.contains('hcal-hidden');
+        if (r.id in self._reservationsMap) {
+          for (var reserv of self._reservationsMap[r.id]) {
+            self._updateReservation(reserv, isHidden);
+          }
+        }
+      }
+      // 2.2 Update room classes
+      for (var room_class of self.options.room_classes)
+      {
+          var tr_name = self._sanitizeId(`ROW_DETAIL_FREE_TYPE_${room_class}`);
+          var x = _.findWhere(self.edtable.rows, {id: tr_name});
+          x.classList.remove('hcal-hidden');
+      }
+      // 2.3 Update room types
+      for (var room_type of self.options.room_types)
+      {
+          var tr_name = self._sanitizeId(`ROW_DETAIL_PRICE_ROOM_${self._pricelist_id}_${room_type}`);
+          var x = _.findWhere(self.edtable.rows, {id: tr_name});
+          x.classList.remove('hcal-hidden');
+      }
+    }, this);
     //_.defer(function(){ this._updateReservationOccupation() }.bind(this));
   },
 
@@ -1231,6 +1269,8 @@ HotelCalendar.prototype = {
           });
         }
       });
+      // Initialize Save Button state to disable
+      this.btnSaveChanges.disabled = true;
       cell.appendChild(this.btnSaveChanges);
     }
     //cell.setAttribute('class', 'col-xs-1 col-lg-1');
@@ -2442,8 +2482,10 @@ HotelCalendar.prototype = {
     if (this.edivc.querySelector('.hcal-input-changed') !== null)
     {
       this.btnSaveChanges.classList.add('need-save');
+      this.btnSaveChanges.disabled = false;
     } else {
       this.btnSaveChanges.classList.remove('need-save');
+      this.btnSaveChanges.disabled = true;
     }
   },
 

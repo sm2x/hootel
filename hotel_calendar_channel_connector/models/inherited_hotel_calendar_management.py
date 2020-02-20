@@ -32,13 +32,24 @@ class HotelCalendarManagement(models.TransientModel):
 
     @api.model
     def _generate_avalaibility_data(self, room_type, date, avail):
-        return {
-            'id': avail and avail.id or False,
-            'date': avail and avail.date or date,
-            'no_ota': avail and avail.no_ota or False,
-            'quota': avail and avail.quota or -1,
-            'max_avail': avail and avail.max_avail or -1,
+        avalaibility_data = {
+            'id': False,
+            'date': date,
+            'no_ota': False,
+            'quota': room_type.channel_bind_ids.default_quota,
+            'max_avail': room_type.channel_bind_ids.default_max_avail,
+            'channel_avail': room_type.channel_bind_ids.default_availability
         }
+        if avail:
+            avalaibility_data = {
+                'id': avail.id,
+                'date': avail.date,
+                'no_ota': avail.no_ota,
+                'quota': avail.quota,
+                'max_avail': avail.max_avail,
+                'channel_avail': avail.channel_bind_ids.channel_avail
+            }
+        return avalaibility_data
 
     @api.model
     def _get_availability_values(self, vals):
@@ -51,7 +62,7 @@ class HotelCalendarManagement(models.TransientModel):
 
     @api.multi
     def save_changes(self, pricelist_id, restriction_id, pricelist,
-                     restrictions, availability=False):
+                     restrictions, availability={}):
         res = super(HotelCalendarManagement, self).save_changes(
             pricelist_id,
             restriction_id,

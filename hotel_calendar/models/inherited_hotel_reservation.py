@@ -3,6 +3,7 @@
 import logging
 from datetime import timedelta
 from odoo import models, fields, api, _
+from odoo.models import operator
 from odoo.exceptions import ValidationError
 from odoo.tools import DEFAULT_SERVER_DATE_FORMAT
 _logger = logging.getLogger(__name__)
@@ -19,43 +20,42 @@ class HotelReservation(models.Model):
     @api.multi
     def _generate_color(self):
         self.ensure_one()
-
         reserv_color = '#FFFFFF'
         reserv_color_text = '#000000'
-        user = self.env.user
+        ICPSudo = self.env['ir.config_parameter'].sudo()
         if self.reservation_type == 'staff':
-            reserv_color = user.color_staff
-            reserv_color_text = user.color_letter_staff
+            reserv_color = ICPSudo.get_param('hotel_calendar.color_staff')
+            reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_staff')
         elif self.reservation_type == 'out':
-            reserv_color = user.color_dontsell
-            reserv_color_text = user.color_letter_dontsell
+            reserv_color = ICPSudo.get_param('hotel_calendar.color_dontsell')
+            reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_dontsell')
         elif self.to_assign:
-            reserv_color = user.color_to_assign
-            reserv_color_text = user.color_letter_to_assign
+            reserv_color = ICPSudo.get_param('hotel_calendar.color_to_assign')
+            reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_to_assign')
         elif self.state == 'draft':
-            reserv_color = user.color_pre_reservation
-            reserv_color_text = user.color_letter_pre_reservation
+            reserv_color = ICPSudo.get_param('hotel_calendar.color_pre_reservation')
+            reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_pre_reservation')
         elif self.state == 'confirm':
             if self.folio_id.pending_amount <= 0:
-                reserv_color = user.color_reservation_pay
-                reserv_color_text = user.color_letter_reservation_pay
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_reservation_pay')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_reservation_pay')
             else:
-                reserv_color = user.color_reservation
-                reserv_color_text = user.color_letter_reservation
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_reservation')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_reservation')
         elif self.state == 'booking':
             if self.folio_id.pending_amount <= 0:
-                reserv_color = user.color_stay_pay
-                reserv_color_text = user.color_letter_stay_pay
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_stay_pay')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_stay_pay')
             else:
-                reserv_color = user.color_stay
-                reserv_color_text = user.color_letter_stay
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_stay')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_stay')
         else:
             if self.folio_id.pending_amount <= 0:
-                reserv_color = user.color_checkout
-                reserv_color_text = user.color_letter_checkout
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_checkout')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_checkout')
             else:
-                reserv_color = user.color_payment_pending
-                reserv_color_text = user.color_letter_payment_pending
+                reserv_color = ICPSudo.get_param('hotel_calendar.color_payment_pending')
+                reserv_color_text = ICPSudo.get_param('hotel_calendar.color_letter_payment_pending')
         return (reserv_color, reserv_color_text)
 
     @api.depends('state', 'reservation_type', 'folio_id.pending_amount', 'to_assign')
@@ -94,7 +94,9 @@ class HotelReservation(models.Model):
                 'state': reserv['state'],
                 'price_room_services_set': reserv['price_room_services_set'],
                 'amount_total': reserv['amount_total'],
-                'real_dates': [reserv['real_checkin'], reserv['real_checkout']]})
+                'real_dates': [reserv['real_checkin'], reserv['real_checkout']],
+                'channel_type': reserv['channel_type'],
+            })
             json_reservation_tooltips.update({
                 reserv['id']: {
                     'folio_name': reserv['folio_name'],
@@ -141,7 +143,7 @@ class HotelReservation(models.Model):
                 'capacity': room.capacity,
                 'class_name': room.room_type_id.class_id.name,
                 'class_id': room.room_type_id.class_id.id,
-                'shared': room.shared_room,
+                'shared_id': room.shared_room_id,
                 'price': room.room_type_id
                 and ['pricelist', room.room_type_id.id, pricelist_id,
                      room.room_type_id.name] or 0,
@@ -246,16 +248,16 @@ class HotelReservation(models.Model):
 
         self.env.cr.execute('''
             WITH RECURSIVE gen_table_days AS (
-              SELECT hrt.id, %s::Date AS date
+              SELECT hrt.id, %s::Date AS date, hrt.sequence
               FROM hotel_room_type AS hrt
                 UNION ALL
-              SELECT hrt.id, (td.date + INTERVAL '1 day')::Date
+              SELECT hrt.id, (td.date + INTERVAL '1 day')::Date, hrt.sequence
               FROM gen_table_days as td
               LEFT JOIN hotel_room_type AS hrt ON hrt.id=td.id
               WHERE td.date < %s
             )
             SELECT
-              TO_CHAR(gtd.date, 'DD/MM/YYYY') as date, gtd.id as room_type_id,
+              TO_CHAR(gtd.date, 'DD/MM/YYYY') as date, gtd.id as room_type_id, gtd.sequence,
               pt.name, ppi.fixed_price as price, pt.list_price
             FROM gen_table_days AS gtd
             LEFT JOIN hotel_room_type AS hrt ON hrt.id = gtd.id
@@ -273,13 +275,17 @@ class HotelReservation(models.Model):
                 json_data.setdefault(results['room_type_id'], {}).update({
                     'title': results['name'],
                     'room': results['room_type_id'],
+                    'sequence': results['sequence'],
                 })
             json_data[results['room_type_id']].setdefault('days', {}).update({
                 results['date']: results['price'] or results['list_price']
             })
 
+        json_data_by_sequence = list(json_data.values())
+        json_data_by_sequence.sort(key=operator.itemgetter('sequence'))
+
         json_rooms_prices = {}
-        for prices in list(json_data.values()):
+        for prices in json_data_by_sequence:
             json_rooms_prices.setdefault(pricelist_id, []).append(prices)
         return json_rooms_prices
 

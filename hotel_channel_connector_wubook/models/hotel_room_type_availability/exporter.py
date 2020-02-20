@@ -31,7 +31,7 @@ class HotelRoomTypeAvailabilityExporter(Component):
                     date_dt = fields.Date.from_string(channel_room_type_avail.date)
                     days.append({
                         'date': date_dt.strftime(DEFAULT_WUBOOK_DATE_FORMAT),
-                        'avail': channel_room_type_avail.quota, # FIXME max_avail __or__ quota ¿?
+                        'avail': channel_room_type_avail.channel_avail,
                         'no_ota': channel_room_type_avail.no_ota and 1 or 0,
                         # 'booked': room_type_avail.booked and 1 or 0,
                     })
@@ -44,6 +44,17 @@ class HotelRoomTypeAvailabilityExporter(Component):
         _logger.info(avails)
         if any(avails):
             try:
+                # For functions updating room values (like availability, prices, restrictions and so on),
+                # for example update_avail(), there is a maximum number of updatable days (for __each room__)
+                # depending on the time window.
+                # Number of updated days    Time window (seconds)
+                # 1460                      1
+                # 4380                      180
+                # 13140                     3600
+                # 25550                     43200
+                # 29200                     86400
+                # 32850                     172800
+                # 36500                     259200
                 self.backend_adapter.update_availability(avails)
             except ChannelConnectorError as err:
                 self.create_issue(
@@ -52,7 +63,7 @@ class HotelRoomTypeAvailabilityExporter(Component):
                     channel_message=err.data['message'])
                 return False
             else:
-                channel_room_type_avails.with_context({
+                channel_room_type_avail_ids.with_context({
                     'connector_no_export': True,
                 }).write({
                     'channel_pushed': True,

@@ -1,7 +1,7 @@
 # Copyright 2018 Alexandre Díaz <dev@redneboa.es>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from openerp import models, fields, api
+from odoo import models, fields, api
 from odoo.addons.queue_job.job import job
 
 
@@ -19,6 +19,7 @@ class HotelFolio(models.Model):
     has_channel_reservations = fields.Boolean(compute=_has_channel_reservations,
                                               store=False,
                                               old_name='whas_wubook_reservations')
+    unconfirmed_channel_price = fields.Boolean(default=False)
 
     @job(default_channel='root.channel')
     @api.model
@@ -31,7 +32,6 @@ class HotelFolio(models.Model):
     def action_confirm(self):
         for rec in self:
             rec.room_lines.write({
-                'to_read': False,
                 'to_assign': False,
             })
         return super().action_confirm()

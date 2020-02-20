@@ -4,6 +4,7 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError
 
+
 class HotelServiceLine(models.Model):
     _name = "hotel.service.line"
     _order = "date"
@@ -14,6 +15,45 @@ class HotelServiceLine(models.Model):
     date = fields.Date('Date')
     day_qty = fields.Integer('Units')
     product_id = fields.Many2one(related='service_id.product_id', store=True)
+    price_total = fields.Float('Price Total',
+                               compute='_compute_price_total',
+                               store=True)
+    price_unit = fields.Float('Unit Price',
+                              related="service_id.price_unit",
+                              readonly=True,
+                              store=True)
+    room_id = fields.Many2one(strin='Room',
+                              related="service_id.ser_room_line",
+                              readonly=True,
+                              store=True)
+    discount = fields.Float('Discount',
+                            related="service_id.discount",
+                            readonly=True,
+                            store=True)
+    cancel_discount = fields.Float('Discount', compute='_compute_cancel_discount')
+    tax_ids = fields.Many2many('account.tax',
+                               string='Taxes',
+                               related="service_id.tax_ids",
+                               readonly="True")
+
+    def _cancel_discount(self):
+        for record in self:
+            if record.reservation_id:
+                day = record.reservation_id.reservation_line_ids.filtered(
+                    lambda d: d.date == record.date
+                )
+                record.cancel_discount = day.cancel_discount
+
+    @api.depends('day_qty', 'service_id.price_total')
+    def _compute_price_total(self):
+        """
+        Used to reports
+        """
+        for record in self:
+            if record.service_id.product_qty != 0:
+                record.price_total = (record.service_id.price_total * record.day_qty) / record.service_id.product_qty
+            else:
+                record.price_total = 0
 
     @api.constrains('day_qty')
     def no_free_resources(self):
@@ -29,6 +69,3 @@ class HotelServiceLine(models.Model):
                     raise ValidationError(
                     _("%s limit exceeded for %s")% (record.service_id.product_id.name,
                                                     record.date))
-
-                
-        

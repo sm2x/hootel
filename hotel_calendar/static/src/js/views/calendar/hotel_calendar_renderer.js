@@ -219,7 +219,7 @@ var HotelCalendarView = AbstractRenderer.extend({
         }.bind(this));
     },
 
-    _generate_search_domain: function(tsearch) {
+    _generate_search_domain: function(tsearch, type) {
       var domain = [];
       domain.push('|', '|', '|', '|',
                   ['partner_id.name', 'ilike', tsearch],
@@ -227,7 +227,30 @@ var HotelCalendarView = AbstractRenderer.extend({
                   ['partner_id.vat', 'ilike', tsearch],
                   ['partner_id.email', 'ilike', tsearch],
                   ['partner_id.phone', 'ilike', tsearch]);
+      if (type === 'invoice') {
+        domain.splice(0, 0, '|');
+        domain.push(['number', 'ilike', tsearch]);
+      }
       return domain;
+    },
+
+    _generate_search_res_model: function(type) {
+      var model = '';
+      var title = '';
+      if (type === 'book') {
+        model = 'hotel.reservation';
+        title = _t('Reservations');
+      } else if (type === 'checkin') {
+        model = 'hotel.checkin.partner';
+        title = _t('Checkins');
+      } else if (type === 'invoice') {
+        model = 'account.invoice';
+        title = _t('Invoices');
+      } else if (type === 'folio') {
+        model = 'hotel.folio'
+        title = _t('Folios');
+      }
+      return [model, title];
     },
 
     _open_search_tree: function(type) {
@@ -235,26 +258,12 @@ var HotelCalendarView = AbstractRenderer.extend({
       var searchQuery = $elm.val();
       var domain = false;
       if (searchQuery) {
-        domain = this._generate_search_domain(searchQuery);
+        domain = this._generate_search_domain(searchQuery, type);
       } else {
         domain = [];
       }
 
-      var model = '';
-      var title = '';
-      if (type === 'book' || type === 'book') {
-        model = 'hotel.reservation';
-        title = _t('Reservations');
-      } else if (type === 'checkin') {
-        model = 'hotel.checkin.partner';
-        title = _t('Checkins');
-      } else if (type === 'invoice') {
-        model = 'sale.order';
-        title = _t('Invoices');
-      } else if (type === 'folio') {
-        model = 'hotel.folio'
-        title = _t('Folios');
-      }
+      var [model, title] = this._generate_search_res_model(type);
 
       this.do_action({
         type: 'ir.actions.act_window',

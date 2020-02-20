@@ -1,6 +1,7 @@
 # Copyright 2018 Alexandre Díaz <dev@redneboa.es>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
+from datetime import timedelta
 import xmlrpc.client
 from urllib.parse import urljoin
 from odoo.addons.component.core import AbstractComponent
@@ -8,6 +9,7 @@ from odoo.addons.queue_job.exception import RetryableJobError
 from odoo.addons.payment.models.payment_acquirer import _partner_split_name
 from odoo.addons.hotel_channel_connector.components.core import ChannelConnectorError
 from odoo import fields, _
+from odoo.tools.misc import DEFAULT_SERVER_DATE_FORMAT
 
 # GLOBAL VARS
 DEFAULT_WUBOOK_DATE_FORMAT = "%d/%m/%Y"
@@ -198,6 +200,18 @@ class WuBookAdapter(AbstractComponent):
         return results
 
     def fetch_rooms_values(self, date_from, date_to, rooms=False):
+        # WuBook Knowledge Base:
+        # 1.- The returned restrictions are the Standard Restrictions (default restriction plan).
+        # The prices are related to the WuBook Parity, that is, pid = 0 (unless you modify it, linking the
+        # WuBook Parity to a specific pricing plan).
+        # 2.- You simply can't download room information for days in the past or more than 2 years in the future.
+        date_today = fields.Date.today()
+        date_2_years = (fields.Date.from_string(date_today) + timedelta(days=365) * 2).strftime(
+            DEFAULT_SERVER_DATE_FORMAT)
+        if date_from < date_today or date_from > date_2_years:
+            date_from = date_today
+        if date_to < date_today or date_to > date_2_years:
+            date_to = date_today
         rcode, results = self._server.fetch_rooms_values(
             self._session_info[0],
             self._session_info[1],
@@ -286,13 +300,28 @@ class WuBookAdapter(AbstractComponent):
             })
         return results
 
+    def fetch_bookings(self, dfrom, dto):
+        rcode, results = self._server.fetch_bookings(
+            self._session_info[0],
+            self._session_info[1],
+            fields.Date.from_string(dfrom).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
+            fields.Date.from_string(dto).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
+            0, # When oncreated is 0, the filter is applied against the arrival date
+            1)
+        if rcode != 0:
+            raise ChannelConnectorError(_("Can't process reservations from wubook"), {
+                'message': results,
+            })
+        return results
+
     def fetch_booking(self, channel_reservation_id):
         rcode, results = self._server.fetch_booking(
             self._session_info[0],
             self._session_info[1],
-            channel_reservation_id)
+            channel_reservation_id,
+            1)
         if rcode != 0:
-            raise ChannelConnectorError(_("Can't process reservation from wubook"), {
+            raise ChannelConnectorError(_("Can't process reservations from wubook"), {
                 'message': results,
             })
         return results
@@ -318,6 +347,36 @@ class WuBookAdapter(AbstractComponent):
             daily)
         if rcode != 0:
             raise ChannelConnectorError(_("Can't add pricing plan to wubook"), {
+                'message': results,
+            })
+        return results
+
+    def create_vplan(self, name, pid, dtype, value):
+        rcode, results = self._server.add_vplan(
+            self._session_info[0],
+            self._session_info[1],
+            name,
+            pid,
+            dtype,
+            value,
+        )
+        if rcode != 0:
+            raise ChannelConnectorError(_("Can't add virtual pricing plan to wubook"), {
+                'message': results,
+            })
+        return results
+
+    def modify_vplan(self, pid, dtype, value):
+        rcode, results = self._server.mod_vplans(
+            self._session_info[0],
+            self._session_info[1],
+            [{'pid': pid,
+              'variation': value,
+              'variation_type': dtype
+              }]
+        )
+        if rcode != 0:
+            raise ChannelConnectorError(_("Can't modify virtual pricing plan in wubook"), {
                 'message': results,
             })
         return results
@@ -414,13 +473,32 @@ class WuBookAdapter(AbstractComponent):
         return results
 
     def wired_rplan_get_rplan_values(self, date_from, date_to, channel_restriction_plan_id):
-        rcode, results = self._server.wired_rplan_get_rplan_values(
-            self._session_info[0],
-            self._session_info[1],
-            '1.1',
-            fields.Date.from_string(date_from).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
-            fields.Date.from_string(date_to).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
-            int(channel_restriction_plan_id))
+        # fetch_rooms_values returns a KV structure for each room and for each day
+        # corresponding to the default WuBook restriction plan with rpid=0.
+        if int(channel_restriction_plan_id) == 0:
+            rcode, results = self._server.fetch_rooms_values(
+                self._session_info[0],
+                self._session_info[1],
+                fields.Date.from_string(date_from).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
+                fields.Date.from_string(date_to).strftime(DEFAULT_WUBOOK_DATE_FORMAT))
+            # prepare KV structure as expeced by _generate_restriction_items
+            for room_type in results:
+                restrictions = results[room_type]
+                date = fields.Date.from_string(date_from)
+                for daily_restriction in restrictions:
+                    daily_restriction.update({'date': date.strftime(DEFAULT_WUBOOK_DATE_FORMAT)})
+                    date = date + timedelta(days=1)
+            results = {'0': results}
+        else:
+            # WuBook Knowledge Base: restriction plan besides the wubook restrictions
+            # are not returned by wired_rplan_get_rplan_values
+            rcode, results = self._server.wired_rplan_get_rplan_values(
+                self._session_info[0],
+                self._session_info[1],
+                '1.1',
+                fields.Date.from_string(date_from).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
+                fields.Date.from_string(date_to).strftime(DEFAULT_WUBOOK_DATE_FORMAT),
+                int(channel_restriction_plan_id))
         if rcode != 0:
             raise ChannelConnectorError(_("Can't fetch restriction plans from wubook"), {
                 'message': results,

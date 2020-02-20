@@ -12,7 +12,7 @@ from odoo.exceptions import except_orm, UserError, ValidationError
 from odoo.tools import (
     misc,
     float_is_zero,
-    float_compare,    
+    float_compare,
     DEFAULT_SERVER_DATETIME_FORMAT,
     DEFAULT_SERVER_DATE_FORMAT)
 from odoo import models, fields, api, _
@@ -26,13 +26,6 @@ class HotelFolio(models.Model):
     _description = 'Hotel Folio'
     _inherit = ['mail.thread', 'mail.activity.mixin', 'portal.mixin']
     _order = 'id'
-
-    # @api.depends('invoice_lines.invoice_id.state', 'invoice_lines.quantity')
-    def _get_invoice_qty(self):
-        pass
-    # @api.depends('product_id.invoice_policy', 'order_id.state')
-    def _compute_qty_delivered_updateable(self):
-        pass
 
     @api.model
     def _default_diff_invoicing(self):
@@ -56,7 +49,6 @@ class HotelFolio(models.Model):
           invoice. This is also the default value if the conditions of no other status is met.
         - to invoice: if any Folio line is 'to invoice', the whole Folio is 'to invoice'
         - invoiced: if all Folio lines are invoiced, the Folio is invoiced.
-        - upselling: if all Folio lines are invoiced or upselling, the status is upselling.
 
         The invoice_ids are obtained thanks to the invoice lines of the Folio lines, and we also search
         for possible refunds created directly from existing invoices. This is necessary since such a
@@ -78,35 +70,25 @@ class HotelFolio(models.Model):
 
             # Ignore the status of the deposit product
             deposit_product_id = self.env['sale.advance.payment.inv']._default_product_id()
-            #~ line_invoice_status = [line.invoice_status for line in order.order_line if line.product_id != deposit_product_id]
+            service_invoice_status = [service.invoice_status for service in folio.service_ids if service.product_id != deposit_product_id]
+            reservation_invoice_status = [reservation.invoice_status for reservation in folio.room_lines]
 
-            #~ TODO: REVIEW INVOICE_STATUS
-            #~ if folio.state not in ('confirm', 'done'):
-                #~ invoice_status = 'no'
-            #~ elif any(invoice_status == 'to invoice' for invoice_status in line_invoice_status):
-                #~ invoice_status = 'to invoice'
-            #~ elif all(invoice_status == 'invoiced' for invoice_status in line_invoice_status):
-                #~ invoice_status = 'invoiced'
-            #~ elif all(invoice_status in ['invoiced', 'upselling'] for invoice_status in line_invoice_status):
-                #~ invoice_status = 'upselling'
-            #~ else:
-                #~ invoice_status = 'no'
+            if folio.state not in ('confirm', 'done'):
+                invoice_status = 'no'
+            elif any(invoice_status == 'to invoice' for invoice_status in service_invoice_status) or \
+                    any(invoice_status == 'to invoice' for invoice_status in reservation_invoice_status):
+                invoice_status = 'to invoice'
+            elif all(invoice_status == 'invoiced' for invoice_status in service_invoice_status) or \
+                    any(invoice_status == 'invoiced' for invoice_status in reservation_invoice_status):
+                invoice_status = 'invoiced'
+            else:
+                invoice_status = 'no'
 
             folio.update({
                 'invoice_count': len(set(invoice_ids.ids + refund_ids.ids)),
                 'invoice_ids': invoice_ids.ids + refund_ids.ids,
-                #~ 'invoice_status': invoice_status
+                'invoice_status': invoice_status
             })
-
-    # @api.depends('state', 'product_uom_qty', 'qty_delivered', 'qty_to_invoice', 'qty_invoiced')
-    def _compute_invoice_status(self):
-        pass
-    # @api.depends('product_uom_qty', 'discount', 'price_unit', 'tax_id')
-    def _compute_amount(self):
-        pass
-    # @api.depends('order_line.price_total')
-    def _amount_all(self):
-        pass
 
     @api.model
     def _get_default_team(self):
@@ -117,7 +99,8 @@ class HotelFolio(models.Model):
                        default=lambda self: _('New'))
     client_order_ref = fields.Char(string='Customer Reference', copy=False)
     partner_id = fields.Many2one('res.partner',
-                                 track_visibility='onchange')
+                                 track_visibility='onchange',
+                                 ondelete='restrict',)
 
     room_lines = fields.One2many('hotel.reservation', 'folio_id',
                                  readonly=False,
@@ -125,19 +108,20 @@ class HotelFolio(models.Model):
                                  help="Hotel room reservation detail.",)
 
     service_ids = fields.One2many('hotel.service', 'folio_id',
-                                       readonly=False,
-                                       states={'done': [('readonly', True)]},
-                                       help="Hotel services detail provide to "
-                                       "customer and it will include in "
-                                       "main Invoice.")
+                                  readonly=False,
+                                  states={'done': [('readonly', True)]},
+                                  help="Hotel services detail provide to "
+                                  "customer and it will include in "
+                                  "main Invoice.")
     company_id = fields.Many2one('res.company', 'Company', default=lambda self: self.env['res.company']._company_default_get('hotel.folio'))
     analytic_account_id = fields.Many2one('account.analytic.account', 'Analytic Account', readonly=True, states={'draft': [('readonly', False)], 'sent': [('readonly', False)]}, help="The analytic account related to a folio.", copy=False)
     currency_id = fields.Many2one('res.currency', related='pricelist_id.currency_id',
-                                  string='Currency', readonly=True, required=True)
+                                  string='Currency', readonly=True, required=True, ondelete='restrict',)
 
     pricelist_id = fields.Many2one('product.pricelist',
                                    string='Pricelist',
                                    required=True,
+                                   ondelete='restrict',
                                    states={'draft': [('readonly', False)],
                                            'sent': [('readonly', False)]},
                                    help="Pricelist for current folio.")
@@ -145,12 +129,21 @@ class HotelFolio(models.Model):
                                          ('staff', 'Staff'),
                                          ('out', 'Out of Service')],
                                         'Type', default=lambda *a: 'normal')
-    channel_type = fields.Selection([('door', 'Door'),
-                                     ('mail', 'Mail'),
-                                     ('phone', 'Phone'),
-                                     ('web', 'Web')], 'Sales Channel', default='door')
-    user_id = fields.Many2one('res.users', string='Salesperson', index=True,
+    channel_type = fields.Selection([
+        ('door', 'Door'),
+        ('mail', 'Mail'),
+        ('phone', 'Phone'),
+        ('call', 'Call Center'),
+        ('web', 'Web'),
+        ('agency', 'Agencia'),
+        ('operator', 'Tour operador'),
+        ('virtualdoor', 'Virtual Door'),], 'Sales Channel', default='door')
+    user_id = fields.Many2one('res.users', string='Salesperson', index=True, ondelete='restrict',
                               track_visibility='onchange', default=lambda self: self.env.user)
+    tour_operator_id = fields.Many2one('res.partner',
+                                       'Tour Operator',
+                                       ondelete='restrict',
+                                       domain=[('is_tour_operator', '=', True)])
     date_order = fields.Datetime(
         string='Order Date',
         required=True, readonly=True, index=True,
@@ -182,6 +175,7 @@ class HotelFolio(models.Model):
     return_ids = fields.One2many('payment.return', 'folio_id',
                                  readonly=True)
     payment_term_id = fields.Many2one('account.payment.term', string='Payment Terms', oldname='payment_term')
+    credit_card_details = fields.Text('Credit Card Details')
 
     #Amount Fields------------------------------------------------------
     pending_amount = fields.Monetary(compute='compute_amount',
@@ -214,12 +208,11 @@ class HotelFolio(models.Model):
     invoice_count = fields.Integer(compute='_get_invoiced')
     invoice_ids = fields.Many2many('account.invoice', string='Invoices',
                                    compute='_get_invoiced', readonly=True, copy=False)
-    invoice_status = fields.Selection([('upselling', 'Upselling Opportunity'),
-                                       ('invoiced', 'Fully Invoiced'),
+    invoice_status = fields.Selection([('invoiced', 'Fully Invoiced'),
                                        ('to invoice', 'To Invoice'),
                                        ('no', 'Nothing to Invoice')],
                                       string='Invoice Status',
-                                      compute='_compute_invoice_status',
+                                      compute='_get_invoiced',
                                       store=True, readonly=True, default='no')
     partner_invoice_id = fields.Many2one('res.partner',
                                          string='Invoice Address', required=True,
@@ -235,10 +228,8 @@ class HotelFolio(models.Model):
     partner_invoice_country_id = fields.Many2one(related="partner_invoice_id.country_id")
     partner_invoice_email = fields.Char(related="partner_invoice_id.email")
     partner_invoice_lang  = fields.Selection(related="partner_invoice_id.lang")
-    partner_invoice_type  = fields.Selection(related="partner_invoice_id.type")
-    partner_invoice_parent_id  = fields.Many2one(related="partner_invoice_id.parent_id")
+    partner_parent_id  = fields.Many2one(related="partner_id.parent_id")
     fiscal_position_id = fields.Many2one('account.fiscal.position', oldname='fiscal_position', string='Fiscal Position')
-    partner_diff_invoicing = fields.Boolean('Bill to another Address', default='_default_diff_invoicing')
 
     #WorkFlow Mail Fields-----------------------------------------------
     has_confirmed_reservations_to_send = fields.Boolean(
@@ -257,13 +248,19 @@ class HotelFolio(models.Model):
         help='Margin in days to create a notice if a payment \
                 advance has not been recorded')
     segmentation_ids = fields.Many2many('res.partner.category',
-                                        string='Segmentation')
+                                        string='Segmentation',
+                                        ondelete='restrict')
     client_order_ref = fields.Char(string='Customer Reference', copy=False)
     note = fields.Text('Terms and conditions')
     sequence = fields.Integer(string='Sequence', default=10)
-    team_id = fields.Many2one('crm.team', 'Sales Channel', change_default=True, default=_get_default_team, oldname='section_id')
+    team_id = fields.Many2one('crm.team',
+                              'Sales Channel',
+                              ondelete='restrict',
+                              change_default=True,
+                              default=_get_default_team,
+                              oldname='section_id')
 
-    @api.depends('room_lines.price_total','service_ids.price_total')
+    @api.depends('room_lines.price_total', 'service_ids.price_total')
     def _amount_all(self):
         """
         Compute the total amounts of the SO.
@@ -271,25 +268,26 @@ class HotelFolio(models.Model):
         for record in self:
             amount_untaxed = amount_tax = 0.0
             amount_untaxed = sum(record.room_lines.mapped('price_subtotal')) + \
-                             sum(record.service_ids.mapped('price_subtotal'))
+                sum(record.service_ids.mapped('price_subtotal'))
             amount_tax = sum(record.room_lines.mapped('price_tax')) + \
-                         sum(record.service_ids.mapped('price_tax'))
+                sum(record.service_ids.mapped('price_tax'))
             record.update({
                 'amount_untaxed': record.pricelist_id.currency_id.round(amount_untaxed),
                 'amount_tax': record.pricelist_id.currency_id.round(amount_tax),
                 'amount_total': amount_untaxed + amount_tax,
             })
 
-    @api.depends('amount_total', 'payment_ids', 'return_ids', 'reservation_type')
+    @api.depends('amount_total', 'payment_ids', 'return_ids',
+                 'reservation_type', 'state')
     @api.multi
     def compute_amount(self):
         acc_pay_obj = self.env['account.payment']
         for record in self:
             if record.reservation_type in ('staff', 'out'):
                 vals = {
-                'pending_amount': 0,
-                'invoices_paid': 0,
-                'refund_amount': 0,
+                    'pending_amount': 0,
+                    'invoices_paid': 0,
+                    'refund_amount': 0,
                 }
                 record.update(vals)
             else:
@@ -298,10 +296,17 @@ class HotelFolio(models.Model):
                     ('folio_id', '=', record.id)
                 ])
                 total_paid = sum(pay.amount for pay in payments)
-                return_lines = self.env['payment.return.line'].search([('move_line_ids','in',payments.mapped('move_line_ids.id')),('return_id.state','=', 'done')])
+                return_lines = self.env['payment.return.line'].search([
+                    ('move_line_ids', 'in', payments.mapped('move_line_ids.id')),
+                    ('return_id.state', '=', 'done')
+                    ])
                 total_inv_refund = sum(pay_return.amount for pay_return in return_lines)
+                total = record.amount_total
+                # REVIEW: Must We ignored services in cancelled folios pending amount?
+                if record.state == 'cancelled':
+                    total = total - sum(record.service_ids.mapped('price_total'))
                 vals = {
-                    'pending_amount': record.amount_total - total_paid + total_inv_refund,
+                    'pending_amount': total - total_paid + total_inv_refund,
                     'invoices_paid': total_paid,
                     'refund_amount': total_inv_refund,
                 }
@@ -329,22 +334,6 @@ class HotelFolio(models.Model):
                 'default_communication': self.name,
             },
             'target': 'new',
-        }
-
-    @api.multi
-    def action_payments(self):
-        self.ensure_one()
-        payments_obj = self.env['account.payment']
-        payments = payments_obj.search([('folio_id', '=', self.id)])
-        #invoices = self.mapped('invoice_ids.id')
-        return{
-            'name': _('Payments'),
-            'view_type': 'form',
-            'view_mode': 'tree,form',
-            'res_model': 'account.payment',
-            'target': 'new',
-            'type': 'ir.actions.act_window',
-            'domain': [('id', 'in', payments.ids)],
         }
 
     @api.multi
@@ -388,23 +377,6 @@ class HotelFolio(models.Model):
         }
 
     @api.multi
-    def action_folios_amount(self):
-        reservations = self.env['hotel.reservation'].search([
-            ('checkout', '<=', fields.Date.today())
-        ])
-        folio_ids = reservations.mapped('folio_id.id')
-        folios = self.env['hotel.folio'].search([('id', 'in', folio_ids)])
-        folios = folios.filtered(lambda r: r.pending_amount > 0)
-        return {
-            'name': _('Pending'),
-            'view_type': 'form',
-            'view_mode': 'tree,form',
-            'res_model': 'hotel.folio',
-            'type': 'ir.actions.act_window',
-            'domain': [('id', 'in', folios.ids)]
-        }
-
-    @api.multi
     def go_to_currency_exchange(self):
         '''
          when Money Exchange button is clicked then this method is called.
@@ -444,19 +416,25 @@ class HotelFolio(models.Model):
                 ).next_by_code('hotel.folio') or _('New')
             else:
                 vals['name'] = self.env['ir.sequence'].next_by_code('hotel.folio') or _('New')
-
-
-        # Makes sure partner_invoice_id' and 'pricelist_id' are defined
-        lfields = ('partner_invoice_id', 'partner_shipping_id', 'pricelist_id')
-        if any(f not in vals for f in lfields):
-            partner = self.env['res.partner'].browse(vals.get('partner_id'))
-            addr = partner.address_get(['delivery', 'invoice'])
-            vals['partner_invoice_id'] = vals.setdefault('partner_invoice_id', addr['invoice'])
-            vals['pricelist_id'] = vals.setdefault(
-                'pricelist_id',
-                partner.property_product_pricelist and partner.property_product_pricelist.id)
+        vals.update(self._prepare_add_missing_fields(vals))
         result = super(HotelFolio, self).create(vals)
         return result
+
+    @api.model
+    def _prepare_add_missing_fields(self, values):
+        """ Deduce missing required fields from the onchange """
+        res = {}
+        onchange_fields = ['partner_invoice_id',
+                           'pricelist_id',
+                           'payment_term_id']
+        if values.get('partner_id'):
+            line = self.new(values)
+            if any(f not in values for f in onchange_fields):
+                line.onchange_partner_id()
+            for field in onchange_fields:
+                if field not in values:
+                    res[field] = line._fields[field].convert_to_write(line[field], line)
+        return res
 
     @api.multi
     @api.onchange('partner_id')
@@ -473,20 +451,18 @@ class HotelFolio(models.Model):
                 'partner_invoice_id': False,
                 'payment_term_id': False,
                 'fiscal_position_id': False,
-                'partner_diff_invoicing': False,
             })
             return
 
         addr = self.partner_id.address_get(['invoice'])
         pricelist = self.partner_id.property_product_pricelist and \
-                                 self.partner_id.property_product_pricelist.id or \
-                                 self.env['ir.default'].sudo().get('res.config.settings', 'default_pricelist_id')            
+            self.partner_id.property_product_pricelist.id or \
+            self.env['ir.default'].sudo().get('res.config.settings', 'default_pricelist_id')
         values = {
             'pricelist_id': pricelist,
             'payment_term_id': self.partner_id.property_payment_term_id and self.partner_id.property_payment_term_id.id or False,
             'partner_invoice_id': addr['invoice'],
             'user_id': self.partner_id.user_id.id or self.env.uid,
-            'partner_diff_invoicing': False if self.partner_id.id == addr['invoice'] else True
         }
 
         if self.env['ir.config_parameter'].sudo().get_param('sale.use_sale_note') and \
@@ -501,25 +477,12 @@ class HotelFolio(models.Model):
     @api.multi
     @api.onchange('pricelist_id')
     def onchange_pricelist_id(self):
-        values = {'reservation_type': self.env['hotel.folio'].calcule_reservation_type(
-                                       self.pricelist_id.is_staff,
-                                       self.reservation_type)}
+        values = {'reservation_type': self.env['hotel.folio'].\
+                  calcule_reservation_type(
+                      self.pricelist_id.is_staff,
+                      self.reservation_type
+                  )}
         self.update(values)
-
-    @api.onchange('partner_diff_invoicing')
-    def onchange_partner_diff_invoicing(self):
-        if self.partner_diff_invoicing == False:
-            self.update({'partner_invoice_id': self.partner_id.id})
-        elif self.partner_id == self.partner_invoice_id:
-            self.update({'partner_invoice_id': self.partner_id.address_get(['invoice'])['invoice'] or None})
-
-    @api.onchange('partner_invoice_id')
-    def onchange_partner_invoice_id(self):
-        if self.partner_invoice_id and not self.partner_invoice_id.parent_id and \
-                self.partner_invoice_id != self.partner_id:
-            self.update({
-                'partner_invoice_parent_id': self.partner_id.id,
-                'partner_invoice_type': 'invoice'})
 
     @api.model
     def calcule_reservation_type(self, is_staff, current_type):
@@ -552,17 +515,14 @@ class HotelFolio(models.Model):
 
     @api.multi
     def action_cancel(self):
-        '''
-        @param self: object pointer
-        '''
-        pass
-        # for sale in self:
-        #     if not sale.order_id:
-        #         raise ValidationError(_('Order id is not available'))
-        #     for invoice in sale.invoice_ids:
-        #         invoice.state = 'cancel'
-        #     sale.room_lines.action_cancel()
-        #     sale.order_id.action_cancel()
+        for folio in self:
+            for reservation in folio.room_lines.filtered(lambda res:
+                                                         res.state != 'cancelled'):
+                reservation.action_cancel()
+            self.write({
+                'state': 'cancel',
+            })
+        return True
 
     @api.multi
     def print_quotation(self):
@@ -581,13 +541,14 @@ class HotelFolio(models.Model):
             'state': 'confirm',
             'confirmation_date': fields.Datetime.now()
         })
-        #~ if self.env.context.get('send_email'):
-            #~ self.force_quotation_send()
+
+        # if self.env.context.get('send_email'):
+            # self.force_quotation_send()
 
         # create an analytic account if at least an expense product
-        #~ if any([expense_policy != 'no' for expense_policy in self.order_line.mapped('product_id.expense_policy')]):
-            #~ if not self.analytic_account_id:
-                #~ self._create_analytic_account()
+        # if any([expense_policy != 'no' for expense_policy in self.order_line.mapped('product_id.expense_policy')]):
+            # if not self.analytic_account_id:
+                # self._create_analytic_account()
 
         return True
 
@@ -854,7 +815,7 @@ class HotelFolio(models.Model):
             'mail_template_reservation_reminder_24hrs')[1]
         template_rec = self.env['mail.template'].browse(template_id)
         for reserv_rec in self.search([]):
-            checkin_date = datetime.strptime(reserv_rec.checkin, dt)
+            checkin_date = datetime.strptime(reserv_rec.checkin, DEFAULT_SERVER_DATETIME_FORMAT)
             difference = relativedelta(now_date, checkin_date)
             if(difference.days == -1 and reserv_rec.partner_id.email and
                reserv_rec.state == 'confirm'):
@@ -900,3 +861,32 @@ class HotelFolio(models.Model):
                     info_grouped.append(vals)
         return sorted(sorted(info_grouped,key=lambda k: k['num'], reverse=True),
                       key=lambda k: k['room_type']['id'])
+
+    @api.multi
+    def _get_tax_amount_by_group(self):
+        self.ensure_one()
+        res = {}
+        for line in self.room_lines:
+            price_reduce = line.price_total
+            product = line.room_type_id.product_id
+            taxes = line.tax_ids.compute_all(price_reduce, quantity=1, product=product)['taxes']
+            for tax in line.tax_ids:
+                group = tax.tax_group_id
+                res.setdefault(group, {'amount': 0.0, 'base': 0.0})
+                for t in taxes:
+                    if t['id'] == tax.id or t['id'] in tax.children_tax_ids.ids:
+                        res[group]['amount'] += t['amount']
+                        res[group]['base'] += t['base']
+        for line in self.service_ids:
+            price_reduce = line.price_unit * (1.0 - line.discount / 100.0)
+            taxes = line.tax_ids.compute_all(price_reduce, quantity=line.product_qty, product=line.product_id)['taxes']
+            for tax in line.tax_ids:
+                group = tax.tax_group_id
+                res.setdefault(group, {'amount': 0.0, 'base': 0.0})
+                for t in taxes:
+                    if t['id'] == tax.id or t['id'] in tax.children_tax_ids.ids:
+                        res[group]['amount'] += t['amount']
+                        res[group]['base'] += t['base']
+        res = sorted(res.items(), key=lambda l: l[0].sequence)
+        res = [(l[0].name, l[1]['amount'], l[1]['base'], len(res)) for l in res]
+        return res

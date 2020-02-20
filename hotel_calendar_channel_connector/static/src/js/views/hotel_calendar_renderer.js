@@ -11,11 +11,12 @@ odoo.define('hotel_calendar_channel_connector.PMSHotelCalendarRenderer', functio
     update_buttons_counter_channel_connector: function (nreservations, nissues) {
       // Cloud Reservations
       var $text = this.$el.find('#btn_channel_manager_request .cloud-text');
+      $text.text(nreservations);
       if (nreservations > 0) {
           $text.parent().parent().addClass('button-highlight');
           $text.parent().addClass('incoming');
-          $text.text(nreservations);
       } else {
+          $text.parent().parent().removeClass('button-highlight');
           $text.parent().removeClass('incoming');
       }
 
@@ -38,12 +39,27 @@ odoo.define('hotel_calendar_channel_connector.PMSHotelCalendarRenderer', functio
       });
     },
 
-    _generate_bookings_domain: function(tsearch) {
-      var domain = this._super(tsearch);
-      domain.splice(0, 0, '|');
-      domain.push(['external_id', 'ilike', tsearch]);
+    _generate_search_domain: function(tsearch, type) {
+      var domain = this._super(tsearch, type);
+
+      if (type === 'book') {
+        domain.splice(0, 0, '|');
+        domain.push('|',
+                  ['channel_bind_ids.external_id', 'ilike', tsearch],
+                  ['channel_bind_ids.ota_reservation_id', 'ilike', tsearch]);
+      }
+
       return domain;
-    }
+    },
+
+    _generate_search_res_model: function(type) {
+      var [model, title] = this._super(type);
+      if (type === 'book') {
+        model = 'hotel.reservation';
+      }
+      return [model, title];
+    },
+
   });
 
   return PMSHotelCalendarRenderer;

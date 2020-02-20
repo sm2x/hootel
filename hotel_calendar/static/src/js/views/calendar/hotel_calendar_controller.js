@@ -366,7 +366,6 @@ var PMSCalendarController = AbstractController.extend({
       }).on('hide.bs.collapse', function(ev){
           self.renderer.$el.find('#pms-menu .menu-filter-box h4 i.fa').css({transform: 'rotate(0deg)'});
       });
-
       this._multi_calendar.on('tab_changed', function(ev, active_index){
         if (active_index) {
           self._refresh_view_options(active_index);
@@ -377,6 +376,7 @@ var PMSCalendarController = AbstractController.extend({
     _assign_multi_calendar_events: function() {
         var self = this;
         this._multi_calendar.on_calendar('hcalOnSavePricelist', function(ev){
+          document.getElementById("btn_save_changes").disabled = true;
           self.savePricelist(ev.detail.calendar_obj, ev.detail.pricelist_id, ev.detail.pricelist);
         });
 
@@ -856,25 +856,25 @@ var PMSCalendarController = AbstractController.extend({
           now_fmt = moment().format(HotelConstants.ODOO_DATE_MOMENT_FORMAT);
 
       var domain_checkouts = [
-          ['checkout', '=', now_fmt],
+          ['real_checkout', '=', now_fmt],
           ['state', 'in', ['booking']],
           ['reservation_type', 'not in', ['out']]
       ];
       var domain_checkins = [
-          ['checkin', '=', now_fmt],
+          ['real_checkin', '=', now_fmt],
           ['state', 'in', ['confirm']],
           ['reservation_type', 'not in', ['out']]
       ];
       var domain_overbookings = [
-          ['checkin', '>=', dfrom_fmt],
+          ['real_checkin', '>=', dfrom_fmt],
           ['overbooking', '=', true], ['state', 'not in', ['cancelled']]
       ];
       var domain_cancelled = [
           '|', '&',
-          ['checkout', '>', dfrom_fmt],
-          ['checkout', '<', dto_fmt],
-          ['checkin', '>=', dfrom_fmt],
-          ['checkin', '<=', dto_fmt],
+          ['real_checkout', '>', dfrom_fmt],
+          ['real_checkout', '<', dto_fmt],
+          ['real_checkin', '>=', dfrom_fmt],
+          ['real_checkin', '<=', dto_fmt],
           ['state', '=', 'cancelled']
       ];
 

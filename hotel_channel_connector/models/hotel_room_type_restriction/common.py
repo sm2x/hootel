@@ -1,7 +1,8 @@
 # Copyright 2018 Alexandre Díaz <dev@redneboa.es>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from odoo import api, models, fields
+from odoo import api, models, fields, _
+from odoo.exceptions import UserError
 from odoo.addons.queue_job.job import job
 from odoo.addons.component.core import Component
 from odoo.addons.component_event import skip_if
@@ -52,6 +53,7 @@ class ChannelHotelRoomTypeRestriction(models.Model):
             importer = work.component(usage='hotel.room.type.restriction.importer')
             return importer.import_restriction_plans()
 
+
 class HotelRoomTypeRestriction(models.Model):
     _inherit = 'hotel.room.type.restriction'
 
@@ -78,6 +80,36 @@ class HotelRoomTypeRestriction(models.Model):
                 names.append((name[0], name[1]))
         return names
 
+    @api.multi
+    def open_channel_bind_ids(self):
+        channel_bind_ids = self.mapped('channel_bind_ids')
+        action = self.env.ref('hotel_channel_connector.channel_hotel_room_type_restriction_action').read()[0]
+        action['views'] = [(self.env.ref('hotel_channel_connector.channel_hotel_room_type_restriction_view_form').id, 'form')]
+        action['target'] = 'new'
+        if len(channel_bind_ids) == 1:
+            action['res_id'] = channel_bind_ids.ids[0]
+        elif len(channel_bind_ids) > 1:
+            # WARNING: more than one binding is currently not expected
+            action['domain'] = [('id', 'in', channel_bind_ids.ids)]
+        else:
+            action['context'] = {
+                'default_odoo_id': self.id,
+                'default_name': self.name,
+            }
+        return action
+
+    @api.multi
+    def disconnect_channel_bind_ids(self):
+        # TODO: multichannel rooms is not implemented
+        self.channel_bind_ids.with_context({'connector_no_export': True}).unlink()
+
+    @api.multi
+    def write(self, vals):
+        if 'active' in vals and vals.get('active') is False:
+            self.channel_bind_ids.unlink()
+        return super().write(vals)
+
+
 class BindingHotelRoomTypeListener(Component):
     _name = 'binding.hotel.room.type.restriction.listener'
     _inherit = 'base.connector.listener'
@@ -88,6 +120,7 @@ class BindingHotelRoomTypeListener(Component):
         if 'name' in fields:
             for binding in record.channel_bind_ids:
                 binding.update_plan_name()
+
 
 class ChannelBindingHotelRoomTypeRestrictionListener(Component):
     _name = 'channel.binding.hotel.room.type.restriction.listener'

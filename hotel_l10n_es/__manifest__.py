@@ -34,6 +34,8 @@
         'partner_contact_gender',
         'partner_contact_birthdate',
         'partner_firstname',
+        'partner_vat_unique',
+        'base_iso3166',
     ],
     'data': [
         'data/code.ine.csv',
@@ -42,18 +44,18 @@
         'report/report_parte_viajero.xml',
         'views/report_viajero.xml',
         'wizard/police_wizard.xml',
-        'wizard/ine_wizard.xml',
         'views/category_tourism.xml',
         'views/code_ine.xml',
         'views/inherit_res_company.xml',
         'views/inherit_hotel_checkin_partner_views.xml',
         'security/ir.model.access.csv',
         'views/inherit_res_partner.xml',
+        'views/inherited_hotel_reservation_views.xml',
         'views/report_viajero_document.xml',
         'views/report_viajero_head.xml',
         'views/report_viajero_data.xml',
         'views/report_viajero.xml',
-        'static/src/xml/hotel_l10n_es_templates.xml'
+        'views/hotel_l10n_es_hotel_name.xml'
     ],
     'test': [
     ],

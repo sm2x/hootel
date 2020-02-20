@@ -6,6 +6,7 @@ from odoo.exceptions import UserError
 from odoo.addons.queue_job.job import job
 from odoo.addons.component.core import Component
 from odoo.addons.component_event import skip_if
+from odoo.addons import decimal_precision as dp
 
 
 class ChannelHotelReservation(models.Model):
@@ -20,31 +21,34 @@ class ChannelHotelReservation(models.Model):
                               ondelete='cascade')
     ota_id = fields.Many2one('channel.ota.info',
                              string='Channel OTA ID',
-                             readonly=True,
-                             old_name='wchannel_id')
+                             readonly=True)
     ota_reservation_id = fields.Char("Channel OTA Reservation Code",
-                                     readonly=True,
-                                     old_name='wchannel_reservation_code')
-    channel_raw_data = fields.Text(readonly=True, old_name='wbook_json')
+                                     readonly=True)
+    channel_raw_data = fields.Text(readonly=True)
 
     channel_status = fields.Selection([
         ('0', 'No Channel'),
-    ], string='Channel Status', default='0', readonly=True, old_name='wstatus')
-    channel_status_reason = fields.Char("Channel Status Reason", readonly=True,
-                                        old_name='wstatus_reason')
+    ], string='Channel Status', default='0', readonly=True)
+    channel_status_reason = fields.Char("Channel Status Reason", readonly=True)
     channel_modified = fields.Boolean("Channel Modified", readonly=True,
-                                      default=False, old_name='wmodified')
+                                      default=False)
 
-    @api.depends('channel_reservation_id', 'ota_id')
-    def _is_from_ota(self):
-        for record in self:
-            record.is_from_ota = (record.external_id and record.ota_id)
+    channel_total_amount = fields.Monetary(string='Channel Total Amount',
+                                           readonly=True, digits=dp.get_precision('Product Price'))
+
+    # Inherit binding constrain becouse two reservations can have
+    # the same external_id
+    _sql_constraints = [
+        ('channel_uniq', 'unique(odoo_id, external_id)',
+         'A binding already exists with the same Channel ID.'),
+    ]
 
     @job(default_channel='root.channel')
     @api.model
-    def refresh_availability(self, checkin, checkout, room_id):
+    def refresh_availability(self, checkin, checkout, backend_id, room_id,
+                             room_type_id=False, from_channel=False):
         self.env['channel.hotel.room.type.availability'].refresh_availability(
-            checkin, checkout, room_id)
+            checkin, checkout, backend_id, room_id, room_type_id, from_channel)
 
     @job(default_channel='root.channel')
     @api.model
@@ -61,6 +65,13 @@ class ChannelHotelReservation(models.Model):
             return importer.fetch_new_bookings()
 
     @job(default_channel='root.channel')
+    @api.model
+    def import_reservations_range(self, backend, dfrom, dto):
+        with backend.work_on(self._name) as work:
+            importer = work.component(usage='hotel.reservation.importer')
+            return importer.fetch_bookings(dfrom, dto)
+
+    @job(default_channel='root.channel')
     @api.multi
     def cancel_reservation(self):
         with self.backend_id.work_on(self._name) as work:
@@ -75,60 +86,32 @@ class ChannelHotelReservation(models.Model):
             return exporter.mark_booking(self)
 
     @api.multi
-    def write(self, vals):
-        if self._context.get('connector_no_export', True) and \
-                (vals.get('checkin') or vals.get('checkout') or
-                 vals.get('room_id') or vals.get('state')):
-            older_vals = []
-            new_vals = []
-            for record in self:
-                older_vals.append({
-                    'checkin': record.checkin,
-                    'checkout': record.checkout,
-                    'room_id': record.room_id,
-                })
-                new_vals.append({
-                    'checkin': vals.get('checkin', record.checkin),
-                    'checkout': vals.get('checkout', record.checkout),
-                    'room_id': vals.get('room_id', record.room_id),
-                })
-
-            res = super(ChannelHotelReservation, self).write(vals)
-
-            channel_room_type_avail_obj = self.env['channel.hotel.room.type.availability']
-            for k_i, v_i in enumerate(older_vals):
-                channel_room_type_avail_obj.refresh_availability(
-                    v_i['checkin'],
-                    v_i['checkout'],
-                    v_i['room_id'])
-                channel_room_type_avail_obj.refresh_availability(
-                    new_vals[k_i]['checkin'],
-                    new_vals[k_i]['checkout'],
-                    new_vals[k_i]['room_id'])
-        else:
-            res = super(ChannelHotelReservation, self).write(vals)
-        return res
-
-    @api.multi
     def unlink(self):
         vals = []
         for record in self:
             if record.is_from_ota and self._context.get('ota_limits', True):
                 raise UserError(_("You can't delete OTA's reservations"))
+            backend_id = self.env['channel.hotel.room.type'].search([
+                ('odoo_id', '=', record.room_id.room_type_id.id)
+            ]).backend_id.id
             vals.append({
                 'checkin': record.checkin,
                 'checkout': record.checkout,
+                'backend_id': backend_id,
                 'room_id': record.room_id.id,
             })
         res = super(ChannelHotelReservation, self).unlink()
         if self._context.get('connector_no_export', True):
             channel_room_type_avail_obj = self.env['channel.hotel.room.type.availability']
             for record in vals:
-                channel_room_type_avail_obj.refresh_availability(
+                # FIX: 3rd parameters is backend_id, use room_id=record['room_id'] instead
+                channel_room_type_avail_obj.sudo().refresh_availability(
                     record['checkin'],
                     record['checkout'],
+                    record['backend_id'],
                     record['room_id'])
         return res
+
 
 class HotelReservation(models.Model):
     _inherit = 'hotel.reservation'
@@ -158,27 +141,131 @@ class HotelReservation(models.Model):
         comodel_name='channel.hotel.reservation',
         inverse_name='odoo_id',
         string='Hotel Channel Connector Bindings')
+    ota_id = fields.Many2one('channel.ota.info',
+                             string='Channel OTA ID',
+                             store=True,
+                             compute='_compute_external_data')
+    ota_reservation_id = fields.Char("Channel OTA Reservation Code",
+                                     store=True,
+                                     compute='_compute_external_data')
+    external_id = fields.Char(string='ID on Channel',
+                              store=True,
+                              compute='_compute_external_data')
     # TODO: Dario v2
     # origin_sale = fields.Char('Origin', compute=_get_origin_sale,
     #                           store=True)
     is_from_ota = fields.Boolean('Is From OTA',
-                                 readonly=True,
-                                 old_name='wis_from_channel')
+                                 compute='_compute_external_data',
+                                 store=True)
     able_to_modify_channel = fields.Boolean(compute=_set_access_for_channel_fields,
-                                            string='Is user able to modify channel fields?',
-                                            old_name='able_to_modify_wubook')
-    to_read = fields.Boolean('To Read', default=False)
-    customer_notes = fields.Text(related='folio_id.customer_notes',
-                                 old_name='wcustomer_notes')
+                                            string='Is user able to modify channel fields?')
+    customer_notes = fields.Text(related='folio_id.customer_notes')
+
+    unconfirmed_channel_price = fields.Boolean(related='folio_id.unconfirmed_channel_price')
+
+    @api.depends('channel_bind_ids.external_id', 'channel_bind_ids.ota_id',
+                 'channel_bind_ids.ota_reservation_id')
+    def _compute_external_data(self):
+        for record in self:
+            is_from_ota = False
+            for bind in record.channel_bind_ids:
+                if bind.ota_reservation_id and \
+                        bind.ota_reservation_id != 'undefined':
+                    is_from_ota = True
+            vals = {
+                'ota_reservation_id': record.channel_bind_ids[0].
+                                      ota_reservation_id if
+                                      record.channel_bind_ids else False,
+                'ota_id': record.channel_bind_ids[0].ota_id.id if
+                          record.channel_bind_ids else False,
+                'external_id': record.channel_bind_ids[0].external_id if
+                               record.channel_bind_ids else False,
+                'is_from_ota': is_from_ota
+            }
+            record.update(vals)
+
+    @api.onchange('checkin', 'checkout')
+    def onchange_dates(self):
+        if not self.is_from_ota:
+            return super().onchange_dates()
+
 
     @api.model
     def create(self, vals):
-        if vals.get('external_id') is not None:
+        from_channel = False
+        if vals.get('channel_bind_ids') and vals.get('channel_bind_ids')[0][2] and \
+                vals.get('channel_bind_ids')[0][2].get('external_id') is not None:
             vals.update({'preconfirm': False})
+            from_channel = True
         user = self.env['res.users'].browse(self.env.uid)
         if user.has_group('hotel.group_hotel_call'):
-            vals.update({'to_read': True})
-        return super(HotelReservation, self).create(vals)
+            vals.update({'to_assign': True})
+
+        reservation_id = super(HotelReservation, self).create(vals)
+        backend_id = self.env['channel.hotel.room.type'].search([
+            ('odoo_id', '=', vals['room_type_id'])
+        ]).backend_id
+        # WARNING: more than one backend_id is currently not expected
+        self.env['channel.hotel.room.type.availability'].sudo().refresh_availability(
+            checkin=vals['real_checkin'],
+            checkout=vals['real_checkout'],
+            backend_id=backend_id.id,
+            room_type_id=vals['room_type_id'],
+            from_channel=from_channel,)
+
+        return reservation_id
+
+    @api.multi
+    def write(self, vals):
+        if self._context.get('connector_no_export', True) and \
+                (vals.get('checkin') or vals.get('checkout') or
+                 vals.get('room_id') or vals.get('state') or
+                 'overbooking' in vals):
+            from_channel = False
+            old_vals = []
+            new_vals = []
+            for record in self:
+                if record.channel_bind_ids:
+                    from_channel = True
+                old_backend_id = self.env['channel.hotel.room.type'].search([
+                    ('odoo_id', '=', record.room_id.room_type_id.id)
+                ]).backend_id.id or None
+                old_vals.append({
+                    'checkin': record.checkin,
+                    'checkout': record.checkout,
+                    'backend_id': old_backend_id,
+                    'room_id': record.room_id.id,
+                })
+                # NOTE: A reservation can be moved into a room type not connected to any channel
+                new_backend_id = self.env['channel.hotel.room.type'].search([
+                    ('room_ids', 'in', vals.get('room_id', record.room_id.id))
+                ]).backend_id.id or None
+                new_vals.append({
+                    'checkin': vals.get('checkin', record.checkin),
+                    'checkout': vals.get('checkout', record.checkout),
+                    'backend_id': new_backend_id,
+                    'room_id': vals.get('room_id', record.room_id.id),
+                })
+
+            res = super().write(vals)
+
+            channel_room_type_avail_obj = self.env['channel.hotel.room.type.availability']
+            for k_i, v_i in enumerate(old_vals):
+                channel_room_type_avail_obj.sudo().refresh_availability(
+                    checkin=v_i['checkin'],
+                    checkout=v_i['checkout'],
+                    backend_id=v_i['backend_id'],
+                    room_id=v_i['room_id'],
+                    from_channel=from_channel)
+                channel_room_type_avail_obj.sudo().refresh_availability(
+                    checkin=new_vals[k_i]['checkin'],
+                    checkout=new_vals[k_i]['checkout'],
+                    backend_id=new_vals[k_i]['backend_id'],
+                    room_id=new_vals[k_i]['room_id'],
+                    from_channel=from_channel)
+        else:
+            res = super().write(vals)
+        return res
 
     @api.multi
     def generate_copy_values(self, checkin=False, checkout=False):
@@ -191,7 +278,7 @@ class HotelReservation(models.Model):
             'channel_bind_ids': commands,
             'customer_notes': self.customer_notes,
             'is_from_ota': self.is_from_ota,
-            'to_read': self.to_read,
+            'to_assign': self.to_assign,
         })
         return res
 
@@ -214,18 +301,13 @@ class HotelReservation(models.Model):
 
     @api.multi
     def mark_as_readed(self):
-        self.write({'to_read': False, 'to_assign': False})
+        self.write({'to_assign': False})
 
-    @api.onchange('checkin', 'checkout')
-    def onchange_dates(self):
-        if not self.is_from_ota:
-            return super().onchange_dates()
 
 class ChannelBindingHotelReservationListener(Component):
     _name = 'channel.binding.hotel.reservation.listener'
     _inherit = 'base.connector.listener'
     _apply_on = ['channel.hotel.reservation']
-
 
     @skip_if(lambda self, record, **kwargs: self.no_connector_export(record))
     def on_record_create(self, record, fields=None):

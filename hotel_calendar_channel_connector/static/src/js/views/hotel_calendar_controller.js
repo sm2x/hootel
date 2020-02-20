@@ -42,11 +42,13 @@ var PMSHotelCalendarController = PMSCalendarController.include({
     //--------------------------------------------------------------------------
     // Handlers
     //--------------------------------------------------------------------------
-    _onUpdateButtonsCounter: function (ev) {
+    _update_buttons_counter: function (ev) {
         this._super(ev);
         var self = this;
-        var domain_reservations = [['to_assign', '=', true], ['to_read', '=', true]];
-        var domain_issues = [['to_read', '=', true]];
+        var domain_reservations = [['to_assign', '=', true]];
+        // FIXME: invalid domain search. Issues are in hotel_channel_connector_issue;
+        // var domain_issues = [['to_assign', '=', true]];
+        var domain_issues = [];
         $.when(
             this.model.search_count(domain_reservations),
             this.model.search_count(domain_issues),
@@ -74,7 +76,7 @@ var PMSHotelCalendarController = PMSCalendarController.include({
                 }
                 else if (notif[1]['type'] === 'reservation') {
                     var reserv = notif[1]['reservation'];
-                    if (reserv['external_id']) {
+                    if (reserv['channel_type'] == 'web') {
                         if (notif[1]['action'] === 'create') {
                             this._play_sound(this.SOUNDS.BOOK_NEW);
                         } else if (notif[1]['action'] !== 'unlink' && reserv['state'] === 'cancelled') {
@@ -84,8 +86,13 @@ var PMSHotelCalendarController = PMSCalendarController.include({
                 }
             }
         }
-
         this._super(notifications);
+    },
+
+    _refresh_view_options: function(active_index) {
+      /* btn_channel_manager_request */
+      this._super(active_index);
+
     },
 
 });
